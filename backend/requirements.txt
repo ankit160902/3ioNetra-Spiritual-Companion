@@ -1,0 +1,31 @@
+# Core Framework
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# LLM & AI - ONLY Google Gemini (actually used)
+google-generativeai
+
+# Embeddings - ONLY sentence-transformers (actually used)
+sentence-transformers
+
+# Text Processing - ONLY langchain basics (actually used)
+langchain
+langchain-community
+
+# Voice Processing - ONLY what's used
+openai-whisper
+gtts
+pydub
+
+# Data Processing - Core only
+numpy
+
+# Utilities
+python-multipart
+aiofiles
+python-dotenv
+
+# Logging
+loguru

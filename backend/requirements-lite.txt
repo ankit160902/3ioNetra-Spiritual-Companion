@@ -1,0 +1,31 @@
+# Lightweight requirements for local testing
+# Core Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+httpx==0.26.0
+aiofiles==23.2.1
+python-multipart==0.0.6
+
+# Numerical (no heavy ML libs in lite mode)
+numpy==1.24.3
+
+# Voice Processing (lightweight)
+soundfile==0.12.1
+pydub==0.25.1
+
+# Voice Processing - Lighter TTS alternative
+gTTS==2.5.0
+
+# Vector DB
+qdrant-client==1.7.0
+
+# Utilities
+loguru==0.7.2
+prometheus-client==0.19.0
+
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
