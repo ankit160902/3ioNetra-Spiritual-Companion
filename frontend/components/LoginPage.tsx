@@ -162,13 +162,10 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-amber-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo */}
+        {/* Logo Text */}
         <div className="text-center mb-6">
-          <img
-            src="/3ionetra-logo.png"
-            alt="3ioNetra Logo"
-            className="h-20 w-auto mx-auto"
-          />
+          <h1 className="text-3xl font-bold text-gray-900">3ioNetra</h1>
+          <p className="text-lg text-orange-600 mt-1">Spiritual Companion</p>
         </div>
 
         {/* Login/Register Form */}
