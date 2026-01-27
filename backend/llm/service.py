@@ -1,18 +1,22 @@
 """
-LLM Service for emotionally intelligent, non-repetitive
-Sanātani spiritual companion using Google Gemini
+Final LLM Service – Sanātani Spiritual Companion
+With Long-Term Memory Persistence
 """
 
 import logging
+import json
+import os
 from typing import List, Dict, Optional
 from config import settings
 
 logger = logging.getLogger(__name__)
 
+MEMORY_FILE = "spiritual_memory.json"
 
-# -----------------------------
-# Utility
-# -----------------------------
+# --------------------------------------------------
+# Utilities
+# --------------------------------------------------
+
 def remove_trailing_questions(text: str) -> str:
     lines = text.strip().split("\n")
     while lines and lines[-1].strip().endswith("?"):
@@ -21,15 +25,56 @@ def remove_trailing_questions(text: str) -> str:
 
 
 def is_closure_signal(text: str) -> bool:
-    return text.strip().lower() in {
-        "ok", "okay", "alright", "fine", "i will do it",
-        "i'll do it", "i will do it today", "yes", "yeah"
-    }
+    text = text.strip().lower()
+    return any(
+        phrase in text
+        for phrase in [
+            "ok",
+            "okay",
+            "thanks",
+            "thank you",
+            "got it",
+            "fine",
+            "alright",
+        ]
+    )
+
+# --------------------------------------------------
+# Memory Store (Long-Term)
+# --------------------------------------------------
+
+class MemoryStore:
+    def __init__(self, file_path: str = MEMORY_FILE):
+        self.file_path = file_path
+        self.memory = self._load()
+
+    def _load(self) -> Dict:
+        if not os.path.exists(self.file_path):
+            return {}
+        try:
+            with open(self.file_path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def save(self):
+        with open(self.file_path, "w") as f:
+            json.dump(self.memory, f, indent=2)
+
+    def get_user_memory(self, user_id: str) -> Dict:
+        return self.memory.get(user_id, {})
+
+    def update_user_memory(self, user_id: str, updates: Dict):
+        user_mem = self.memory.get(user_id, {})
+        user_mem.update(updates)
+        self.memory[user_id] = user_mem
+        self.save()
 
 
-# -----------------------------
-# Gemini Import
-# -----------------------------
+# --------------------------------------------------
+# Gemini SDK
+# --------------------------------------------------
+
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
@@ -41,8 +86,8 @@ except Exception:
 class LLMService:
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
-        self.model = None
         self.available = False
+        self.memory_store = MemoryStore()
 
         if not GEMINI_AVAILABLE or not self.api_key:
             return
@@ -50,41 +95,20 @@ class LLMService:
         genai.configure(api_key=self.api_key)
 
         system_instruction = """
-You are a calm, emotionally intelligent Sanātani spiritual companion.
+You are a Sanātani spiritual companion.
 
-CORE BEHAVIOR:
-• Listen deeply
-• Remember what the user has already shared
-• NEVER repeat questions on the same topic
-• NEVER interrogate
-• NEVER dump scriptures
-• Guide gently, practically, and progressively
+You are NOT a therapist.
+You are NOT an interviewer.
+You are NOT a scripture teacher.
 
-CONVERSATION STATES:
+You remember what the user has shared before.
 
-PHASE 1 – UNDERSTANDING
-• Validate emotions
-• Ask only unanswered factual questions
-• Max 2–3 questions total
-• Stop when understanding is sufficient
-
-PHASE 2 – GUIDANCE
-• Reflect the full situation clearly
-• Give NEW, concrete guidance
-• No philosophy repetition
-• No questions
-
-PHASE 3 – CONTAINMENT / CLOSURE
-• User says “ok / I’ll do it”
-• Stop probing
-• Stabilize and reassure
-• Hold emotional space
-
-ABSOLUTE RULES:
-• If user asks for solution / next step → PHASE 2
-• If topic already discussed twice → LOCK IT
-• If closure signal detected → NO QUESTIONS
-• Sound like a wise human, not a therapist or guru
+Rules:
+• Never reopen completed topics
+• Repetition = confirmation
+• Closure = silence and holding
+• Ask less, understand more
+• Calm presence > curiosity
 """
 
         self.model = genai.GenerativeModel(
@@ -93,16 +117,19 @@ ABSOLUTE RULES:
         )
         self.available = True
 
-    # -----------------------------
-    # CONTEXT & MEMORY
-    # -----------------------------
-    def _extract_context(self, history: Optional[List[Dict]]) -> Dict:
+    # --------------------------------------------------
+    # Context + Memory Merge
+    # --------------------------------------------------
+
+    def _extract_context(
+        self,
+        history: Optional[List[Dict]],
+        long_memory: Dict
+    ) -> Dict:
         context = {
-            "duration": None,
-            "support": None,
-            "emotional_impact": None,
-            "priority": None,
-            "topics": {}
+            "family_support": long_memory.get("family_support", False),
+            "support_quality": long_memory.get("support_quality", False),
+            "relationship_crisis": long_memory.get("relationship_crisis", False),
         }
 
         for msg in history or []:
@@ -111,167 +138,133 @@ ABSOLUTE RULES:
 
             text = msg.get("content", "").lower()
 
-            def count(topic):
-                context["topics"][topic] = context["topics"].get(topic, 0) + 1
+            if "wife" in text and "divorce" in text:
+                context["relationship_crisis"] = True
 
-            if any(w in text for w in ["month", "months", "year"]):
-                context["duration"] = True
-                count("duration")
+            if any(w in text for w in ["family", "mother", "father"]):
+                context["family_support"] = True
 
-            if any(w in text for w in ["family", "mother", "mom", "father"]):
-                context["support"] = "family"
-                count("family")
-
-            if any(w in text for w in ["cry", "stress", "hurt"]):
-                context["emotional_impact"] = True
-                count("emotion")
-
-            if any(w in text for w in ["peace", "safe", "protect"]):
-                context["priority"] = "peace"
-                count("priority")
+            if any(w in text for w in ["listen", "support", "understand"]):
+                context["support_quality"] = True
 
         return context
 
-    def _is_topic_locked(self, context: Dict, topic: str) -> bool:
-        return context["topics"].get(topic, 0) >= 2
+    # --------------------------------------------------
+    # Phase Detection
+    # --------------------------------------------------
 
-    # -----------------------------
-    # PHASE DETECTION
-    # -----------------------------
-    def _detect_phase(self, query: str, history: Optional[List[Dict]]) -> str:
-        q = query.lower()
-
-        if is_closure_signal(q):
+    def _detect_phase(self, query: str, context: Dict) -> str:
+        if is_closure_signal(query):
             return "CLOSURE"
 
-        decision_triggers = [
-            "what should i do", "solution", "next step",
-            "help me", "guide me", "save"
-        ]
-        if any(t in q for t in decision_triggers):
-            return "PHASE_2"
+        if context["family_support"] and context["support_quality"]:
+            return "GUIDANCE"
 
-        context = self._extract_context(history)
-        known = sum(1 for v in [
-            context["duration"],
-            context["support"],
-            context["emotional_impact"],
-            context["priority"]
-        ] if v)
+        return "LISTENING"
 
-        if known >= 2:
-            return "PHASE_2"
+    # --------------------------------------------------
+    # Main Response
+    # --------------------------------------------------
 
-        return "PHASE_1"
-
-    # -----------------------------
-    # RESPONSE
-    # -----------------------------
     async def generate_response(
         self,
         query: str,
         context_docs: List[Dict],
         language: str = "en",
-        conversation_history: Optional[List[Dict]] = None
+        conversation_history: Optional[List[Dict]] = None,
+        user_id: str = "default_user"
     ) -> str:
         if not self.available:
-            return "I’m here with you. Please continue."
+            return "I’m here with you."
 
-        phase = self._detect_phase(query, conversation_history)
-        prompt = self._build_prompt(query, conversation_history, phase)
+        long_memory = self.memory_store.get_user_memory(user_id)
+        context = self._extract_context(conversation_history, long_memory)
+        phase = self._detect_phase(query, context)
+
+        # ---- Update long-term memory (only stable facts)
+        updates = {}
+        if context["relationship_crisis"]:
+            updates["relationship_crisis"] = True
+        if context["family_support"]:
+            updates["family_support"] = True
+        if context["support_quality"]:
+            updates["support_quality"] = True
+
+        if updates:
+            self.memory_store.update_user_memory(user_id, updates)
+
+        prompt = self._build_prompt(query, conversation_history, phase, context)
 
         try:
             response = self.model.generate_content(prompt)
-            text = response.text if response else ""
-            return remove_trailing_questions(text)
+            return remove_trailing_questions(response.text if response else "")
         except Exception as e:
             logger.error(str(e))
-            return "I’m here with you. Let’s take this one step at a time."
+            return "I’m here with you. You don’t have to carry this alone."
 
-    # -----------------------------
-    # PROMPT BUILDER
-    # -----------------------------
+    # --------------------------------------------------
+    # Prompt Builder
+    # --------------------------------------------------
+
     def _build_prompt(
         self,
         query: str,
         history: Optional[List[Dict]],
-        phase: str
+        phase: str,
+        context: Dict
     ) -> str:
         history_text = ""
         for msg in (history or [])[-6:]:
             role = "User" if msg["role"] == "user" else "You"
             history_text += f"{role}: {msg['content']}\n"
 
-        context = self._extract_context(history)
-
-        # ---------- PHASE 1 ----------
-        if phase == "PHASE_1":
-            questions = []
-
-            if not context["duration"] and not self._is_topic_locked(context, "duration"):
-                questions.append("How long has this been going on for you?")
-
-            if not context["support"] and not self._is_topic_locked(context, "family"):
-                questions.append("Who do you have around you for support?")
-
-            if not context["emotional_impact"]:
-                questions.append("How is this affecting you emotionally day to day?")
-
-            questions = questions[:2]
-            q_block = "\n".join(f"• {q}" for q in questions)
-
+        # -------- LISTENING --------
+        if phase == "LISTENING":
             return f"""
 {history_text}
 
 User says:
 {query}
 
-Respond with:
-1. Empathy and validation (1–2 lines)
-2. Ask ONLY these questions:
-{q_block}
-3. End gently: “I’m listening.”
-
-NO advice yet.
+Respond with empathy.
+Ask AT MOST ONE missing question.
+No advice.
 """
 
-        # ---------- PHASE 2 ----------
-        if phase == "PHASE_2":
+        # -------- GUIDANCE --------
+        if phase == "GUIDANCE":
             return f"""
 {history_text}
 
 User says:
 {query}
 
-Respond with guidance:
-• Reflect full understanding clearly
-• Name the emotional pattern (without judgment)
-• Give 2–3 practical, NEW actions
-• Focus on emotional safety and stability
-• No questions
-• No scriptures
+Respond by:
+• Acknowledging family support
+• Naming emotional reality calmly
+• Offering ONE grounding suggestion
+• NO questions
 """
 
-        # ---------- CLOSURE ----------
+        # -------- CLOSURE / HOLDING --------
         return f"""
 {history_text}
 
 User says:
 {query}
 
-Respond with containment:
-• Acknowledge their effort
-• Reduce pressure
-• Reassure them they are doing enough
-• No questions
-• Hold calm emotional space
+Respond by:
+• Reassuring
+• Reducing pressure
+• Holding silence
+• NO questions
 """
 
-# -----------------------------
+# --------------------------------------------------
 # Singleton
-# -----------------------------
-_llm_service = None
+# --------------------------------------------------
 
+_llm_service = None
 
 def get_llm_service() -> LLMService:
     global _llm_service
