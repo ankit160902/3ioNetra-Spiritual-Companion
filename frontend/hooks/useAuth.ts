@@ -192,9 +192,9 @@ export function useAuth() {
     });
   }, []);
 
-  // Get auth header
-  const getAuthHeader = useCallback(() => {
-    return authState.token ? { 'Authorization': `Bearer ${authState.token}` } : {};
+  // Get auth header - Fixed to return proper type
+  const getAuthHeader = useCallback((): Record<string, string> | undefined => {
+    return authState.token ? { 'Authorization': `Bearer ${authState.token}` } : undefined;
   }, [authState.token]);
 
   return {
