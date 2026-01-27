@@ -1,27 +1,45 @@
 """
-Authentication Service - Simple file-based user management
-For production, use a proper database like PostgreSQL or MongoDB
+Authentication Service - MongoDB-based user management
 """
-import json
 import hashlib
 import secrets
-import os
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
-from pathlib import Path
 import logging
+from pymongo import MongoClient
+from pymongo.errors import DuplicateKeyError
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Storage paths
-DATA_DIR = Path("./data")
-USERS_FILE = DATA_DIR / "users.json"
-TOKENS_FILE = DATA_DIR / "tokens.json"
-CONVERSATIONS_DIR = DATA_DIR / "conversations"
+# MongoDB client and database
+_mongo_client: Optional[MongoClient] = None
+_db = None
 
-# Ensure directories exist
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
+
+def get_mongo_client():
+    """Get or create MongoDB client"""
+    global _mongo_client, _db
+    if _mongo_client is None:
+        # Construct MongoDB URI with authentication
+        mongo_uri = settings.MONGODB_URI
+        if settings.DATABASE_PASSWORD:
+            # Replace password placeholder if exists
+            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
+        
+        _mongo_client = MongoClient(mongo_uri)
+        _db = _mongo_client[settings.DATABASE_NAME]
+        
+        # Create indexes
+        _db.users.create_index("email", unique=True)
+        _db.tokens.create_index("token", unique=True)
+        _db.tokens.create_index("expires_at")
+        _db.conversations.create_index([("user_id", 1), ("updated_at", -1)])
+        
+        logger.info("MongoDB connection established")
+    
+    return _db
 
 
 def _hash_password(password: str, salt: str = None) -> tuple[str, str]:
@@ -41,34 +59,6 @@ def _verify_password(password: str, hashed: str, salt: str) -> bool:
     """Verify password against hash"""
     check_hash, _ = _hash_password(password, salt)
     return check_hash == hashed
-
-
-def _load_users() -> Dict[str, Any]:
-    """Load users from file"""
-    if USERS_FILE.exists():
-        with open(USERS_FILE, 'r') as f:
-            return json.load(f)
-    return {}
-
-
-def _save_users(users: Dict[str, Any]) -> None:
-    """Save users to file"""
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=2)
-
-
-def _load_tokens() -> Dict[str, Any]:
-    """Load tokens from file"""
-    if TOKENS_FILE.exists():
-        with open(TOKENS_FILE, 'r') as f:
-            return json.load(f)
-    return {}
-
-
-def _save_tokens(tokens: Dict[str, Any]) -> None:
-    """Save tokens to file"""
-    with open(TOKENS_FILE, 'w') as f:
-        json.dump(tokens, f, indent=2)
 
 
 def _generate_token() -> str:
@@ -104,7 +94,10 @@ def _calculate_age_and_group(dob: str) -> tuple[int, str]:
 
 
 class AuthService:
-    """Simple authentication service"""
+    """MongoDB-based authentication service"""
+
+    def __init__(self):
+        self.db = get_mongo_client()
 
     def register_user(
         self,
@@ -117,11 +110,10 @@ class AuthService:
         profession: str = ""
     ) -> Optional[Dict[str, Any]]:
         """Register a new user with extended profile"""
-        users = _load_users()
+        email_lower = email.lower()
 
         # Check if email already exists
-        email_lower = email.lower()
-        if email_lower in users:
+        if self.db.users.find_one({"email": email_lower}):
             return None
 
         # Hash password
@@ -132,7 +124,7 @@ class AuthService:
 
         # Create user
         user_id = _generate_user_id()
-        user = {
+        user_doc = {
             "id": user_id,
             "name": name,
             "email": email_lower,
@@ -144,43 +136,44 @@ class AuthService:
             "profession": profession,
             "password_hash": hashed,
             "password_salt": salt,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.utcnow(),
         }
 
-        # Save user
-        users[email_lower] = user
-        _save_users(users)
+        try:
+            # Save user to MongoDB
+            self.db.users.insert_one(user_doc)
+            logger.info(f"New user registered: {email_lower}")
 
-        # Generate token
-        token = self._create_token(user_id)
+            # Generate token
+            token = self._create_token(user_id)
 
-        logger.info(f"New user registered: {email_lower}")
-
-        return {
-            "user": {
-                "id": user_id,
-                "name": name,
-                "email": email_lower,
-                "phone": phone,
-                "gender": gender,
-                "dob": dob,
-                "age": age,
-                "age_group": age_group,
-                "profession": profession,
-                "created_at": user["created_at"],
-            },
-            "token": token,
-        }
+            return {
+                "user": {
+                    "id": user_id,
+                    "name": name,
+                    "email": email_lower,
+                    "phone": phone,
+                    "gender": gender,
+                    "dob": dob,
+                    "age": age,
+                    "age_group": age_group,
+                    "profession": profession,
+                    "created_at": user_doc["created_at"].isoformat(),
+                },
+                "token": token,
+            }
+        except DuplicateKeyError:
+            logger.error(f"Duplicate email during registration: {email_lower}")
+            return None
 
     def login_user(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """Login an existing user"""
-        users = _load_users()
         email_lower = email.lower()
 
-        if email_lower not in users:
+        # Find user in MongoDB
+        user = self.db.users.find_one({"email": email_lower})
+        if not user:
             return None
-
-        user = users[email_lower]
 
         # Verify password
         if not _verify_password(password, user["password_hash"], user["password_salt"]):
@@ -205,97 +198,70 @@ class AuthService:
                 "age": age,
                 "age_group": age_group,
                 "profession": user.get("profession", ""),
-                "created_at": user["created_at"],
+                "created_at": user["created_at"].isoformat(),
             },
             "token": token,
         }
 
     def _create_token(self, user_id: str) -> str:
         """Create and store a new token for user"""
-        tokens = _load_tokens()
         token = _generate_token()
 
-        tokens[token] = {
+        token_doc = {
+            "token": token,
             "user_id": user_id,
-            "created_at": datetime.utcnow().isoformat(),
-            "expires_at": (datetime.utcnow() + timedelta(days=30)).isoformat(),
+            "created_at": datetime.utcnow(),
+            "expires_at": datetime.utcnow() + timedelta(days=30),
         }
 
-        _save_tokens(tokens)
+        self.db.tokens.insert_one(token_doc)
         return token
 
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
         """Verify token and return user info"""
-        tokens = _load_tokens()
-
-        if token not in tokens:
+        # Find token in MongoDB
+        token_doc = self.db.tokens.find_one({"token": token})
+        if not token_doc:
             return None
 
-        token_data = tokens[token]
-
         # Check expiration
-        expires_at = datetime.fromisoformat(token_data["expires_at"])
-        if datetime.utcnow() > expires_at:
+        if datetime.utcnow() > token_doc["expires_at"]:
             # Token expired, remove it
-            del tokens[token]
-            _save_tokens(tokens)
+            self.db.tokens.delete_one({"token": token})
             return None
 
         # Get user
-        users = _load_users()
-        user_id = token_data["user_id"]
+        user = self.db.users.find_one({"id": token_doc["user_id"]})
+        if not user:
+            return None
 
-        for user in users.values():
-            if user["id"] == user_id:
-                # Recalculate age in case it's been a while
-                age, age_group = _calculate_age_and_group(user.get("dob", ""))
-                return {
-                    "id": user["id"],
-                    "name": user["name"],
-                    "email": user["email"],
-                    "phone": user.get("phone", ""),
-                    "gender": user.get("gender", ""),
-                    "dob": user.get("dob", ""),
-                    "age": age,
-                    "age_group": age_group,
-                    "profession": user.get("profession", ""),
-                    "created_at": user["created_at"],
-                }
-
-        return None
+        # Recalculate age in case it's been a while
+        age, age_group = _calculate_age_and_group(user.get("dob", ""))
+        
+        return {
+            "id": user["id"],
+            "name": user["name"],
+            "email": user["email"],
+            "phone": user.get("phone", ""),
+            "gender": user.get("gender", ""),
+            "dob": user.get("dob", ""),
+            "age": age,
+            "age_group": age_group,
+            "profession": user.get("profession", ""),
+            "created_at": user["created_at"].isoformat(),
+        }
 
     def logout_user(self, token: str) -> bool:
         """Logout user by invalidating token"""
-        tokens = _load_tokens()
-
-        if token in tokens:
-            del tokens[token]
-            _save_tokens(tokens)
-            return True
-
-        return False
+        result = self.db.tokens.delete_one({"token": token})
+        return result.deleted_count > 0
 
 
 class ConversationStorage:
-    """Store and retrieve user conversations"""
+    """Store and retrieve user conversations in MongoDB"""
 
-    def _get_user_conversations_file(self, user_id: str) -> Path:
-        """Get the path to user's conversations file"""
-        return CONVERSATIONS_DIR / f"{user_id}.json"
-
-    def _load_user_conversations(self, user_id: str) -> Dict[str, Any]:
-        """Load all conversations for a user"""
-        file_path = self._get_user_conversations_file(user_id)
-        if file_path.exists():
-            with open(file_path, 'r') as f:
-                return json.load(f)
-        return {"conversations": {}}
-
-    def _save_user_conversations(self, user_id: str, data: Dict[str, Any]) -> None:
-        """Save conversations for a user"""
-        file_path = self._get_user_conversations_file(user_id)
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=2)
+    def __init__(self):
+        self.db = get_mongo_client()
 
     def save_conversation(
         self,
@@ -305,65 +271,78 @@ class ConversationStorage:
         messages: list
     ) -> str:
         """Save or update a conversation"""
-        data = self._load_user_conversations(user_id)
-
         # Generate new ID if not provided
         if not conversation_id:
             conversation_id = secrets.token_hex(8)
 
-        # Save conversation
-        data["conversations"][conversation_id] = {
+        # Check if conversation exists
+        existing = self.db.conversations.find_one({
+            "user_id": user_id,
+            "id": conversation_id
+        })
+
+        conversation_doc = {
             "id": conversation_id,
+            "user_id": user_id,
             "title": title[:100],  # Limit title length
             "messages": messages,
             "message_count": len(messages),
-            "created_at": data["conversations"].get(conversation_id, {}).get(
-                "created_at", datetime.utcnow().isoformat()
-            ),
-            "updated_at": datetime.utcnow().isoformat(),
+            "created_at": existing["created_at"] if existing else datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
         }
 
-        self._save_user_conversations(user_id, data)
-        logger.info(f"Saved conversation {conversation_id} for user {user_id}")
+        # Upsert conversation
+        self.db.conversations.update_one(
+            {"user_id": user_id, "id": conversation_id},
+            {"$set": conversation_doc},
+            upsert=True
+        )
 
+        logger.info(f"Saved conversation {conversation_id} for user {user_id}")
         return conversation_id
 
     def get_conversations_list(self, user_id: str, limit: int = 20) -> list:
         """Get list of conversations for a user (most recent first)"""
-        data = self._load_user_conversations(user_id)
-
-        conversations = list(data["conversations"].values())
-
-        # Sort by updated_at descending
-        conversations.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
+        conversations = list(
+            self.db.conversations
+            .find({"user_id": user_id})
+            .sort("updated_at", -1)
+            .limit(limit)
+        )
 
         # Return summary only (without full messages)
         return [
             {
                 "id": c["id"],
                 "title": c["title"],
-                "created_at": c["created_at"],
+                "created_at": c["created_at"].isoformat(),
                 "message_count": c["message_count"],
             }
-            for c in conversations[:limit]
+            for c in conversations
         ]
 
     def get_conversation(self, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
         """Get a specific conversation"""
-        data = self._load_user_conversations(user_id)
+        conversation = self.db.conversations.find_one({
+            "user_id": user_id,
+            "id": conversation_id
+        })
 
-        if conversation_id in data["conversations"]:
-            return data["conversations"][conversation_id]
+        if conversation:
+            # Convert datetime to ISO format for JSON serialization
+            conversation["created_at"] = conversation["created_at"].isoformat()
+            conversation["updated_at"] = conversation["updated_at"].isoformat()
 
-        return None
+        return conversation
 
     def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
         """Delete a conversation"""
-        data = self._load_user_conversations(user_id)
+        result = self.db.conversations.delete_one({
+            "user_id": user_id,
+            "id": conversation_id
+        })
 
-        if conversation_id in data["conversations"]:
-            del data["conversations"][conversation_id]
-            self._save_user_conversations(user_id, data)
+        if result.deleted_count > 0:
             logger.info(f"Deleted conversation {conversation_id} for user {user_id}")
             return True
 
