@@ -56,8 +56,8 @@ logs/
 .cache
 .pytest_cache
 
-# Models and data (if large)
-models/
+# ML models and data (if large) - NOT the Python models/ package
+ml_models/
 data/
 *.pth
 *.bin
