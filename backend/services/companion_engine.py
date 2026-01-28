@@ -88,6 +88,15 @@ class CompanionEngine:
             # Build user profile from session memory
             user_profile = self._build_user_profile(session.memory)
             
+            # Log profile for debugging
+            logger.info(
+                f"Session {session.session_id}: User profile for LLM: "
+                f"name={user_profile.get('name', 'NOT_SET')}, "
+                f"age={user_profile.get('age_group', 'NOT_SET')}, "
+                f"profession={user_profile.get('profession', 'NOT_SET')}, "
+                f"gender={user_profile.get('gender', 'NOT_SET')}"
+            )
+            
             reply = await self.llm.generate_response(
                 query=message,
                 context_docs=context_docs,  # Now passing RAG context!
@@ -127,10 +136,6 @@ class CompanionEngine:
             profile['gender'] = memory.story.gender
         if memory.story.profession:
             profile['profession'] = memory.story.profession
-        if memory.story.life_situation:
-            profile['life_situation'] = memory.story.life_situation
-        if memory.story.life_stage:
-            profile['life_stage'] = memory.story.life_stage
         
         return profile
 

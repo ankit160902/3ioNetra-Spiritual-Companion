@@ -240,18 +240,33 @@ You ARE:
         # Format user profile if available
         profile_text = ""
         if user_profile:
+            has_data = False
             profile_parts = []
-            if user_profile.get('name'):
-                profile_parts.append(f"Name: {user_profile.get('name')}")
-            if user_profile.get('age_group'):
-                profile_parts.append(f"Age Group: {user_profile.get('age_group')}")
-            if user_profile.get('profession'):
-                profile_parts.append(f"Profession: {user_profile.get('profession')}")
-            if user_profile.get('gender'):
-                profile_parts.append(f"Gender: {user_profile.get('gender')}")
             
-            if profile_parts:
-                profile_text = "\nUser Profile:\n" + "\n".join(f"- {p}" for p in profile_parts) + "\n"
+            if user_profile.get('name'):
+                profile_parts.append(f"   • Their name is: {user_profile.get('name')}")
+                has_data = True
+            if user_profile.get('age_group'):
+                profile_parts.append(f"   • Age group: {user_profile.get('age_group')}")
+                has_data = True
+            if user_profile.get('profession'):
+                profile_parts.append(f"   • Profession: {user_profile.get('profession')}")
+                has_data = True
+            if user_profile.get('gender'):
+                profile_parts.append(f"   • Gender: {user_profile.get('gender')}")
+                has_data = True
+            
+            if has_data:
+                profile_text = "\n" + "="*70 + "\n"
+                profile_text += "WHO YOU ARE SPEAKING TO (USE THIS INFORMATION!):\n"
+                profile_text += "="*70 + "\n"
+                profile_text += "\n".join(profile_parts)
+                profile_text += "\n" + "="*70 + "\n"
+                
+                # Add explicit reminder
+                if user_profile.get('name'):
+                    profile_text += f"\n>>> IMPORTANT: Address this person as '{user_profile.get('name')}' in your response <<<\n"
+                profile_text += "\n"
         
         # Format conversation history (last 6 messages)
         history_text = ""
@@ -333,6 +348,13 @@ User's current message:
 Your response approach for this phase ({phase.value}):
 {phase_instructions}
 
+CRITICAL PERSONALIZATION REMINDER:
+- Look at the "WHO YOU ARE SPEAKING TO" section above for their details
+- USE the EXACT name, profession, and age shown there
+- COPY their actual name word-for-word into your response
+- DO NOT use placeholders like [Name], [profession], or example names
+- The name/profession shown above is REAL - use it exactly as written
+
 Respond now with warmth, wisdom, and deep personalization:
 """
         
@@ -360,11 +382,13 @@ Respond now with warmth, wisdom, and deep personalization:
         if phase == ConversationPhase.LISTENING:
             return """
 - Listen with empathy and validate their feelings
-- If scripture wisdom is provided, let it subtly inform your empathy (don't quote directly)
+- Use their actual name naturally if provided in the profile above
+- If scripture wisdom is provided, let it subtly inform your empathy
 - Ask AT MOST ONE clarifying question if critical context is missing
 - Do NOT give advice or spiritual wisdom yet - just be present
 - Keep response warm and conversational
 - Focus on understanding, not solving
+- Make them feel seen and heard as an individual
 """
         
         elif phase == ConversationPhase.GUIDANCE:
@@ -380,8 +404,9 @@ For EVERY verse, follow this structure:
 
 1. CONTEXTUAL INTRODUCTION (2-3 sentences):
    - Explain why THIS specific verse is relevant to THEIR situation
-   - Reference their name, profession, age group, or life circumstances
-   - Example: "Rahul, as someone in the tech field dealing with work-life balance, there's a powerful teaching in the Bhagavad Gita..."
+   - Use their REAL name and context from the profile section above
+   - DO NOT use generic placeholders or example names
+   - Start by addressing them directly by their name
 
 2. THE VERSE (in accessible language):
    - Quote or paraphrase the verse clearly

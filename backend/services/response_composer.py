@@ -86,10 +86,6 @@ class ResponseComposer:
             profile['gender'] = memory.story.gender
         if memory.story.profession:
             profile['profession'] = memory.story.profession
-        if memory.story.life_situation:
-            profile['life_situation'] = memory.story.life_situation
-        if memory.story.life_stage:
-            profile['life_stage'] = memory.story.life_stage
         
         return profile
 
