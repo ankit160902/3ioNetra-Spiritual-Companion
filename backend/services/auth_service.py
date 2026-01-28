@@ -25,8 +25,7 @@ def get_mongo_client():
         # Construct MongoDB URI with authentication
         mongo_uri = settings.MONGODB_URI
 
-        if settings.DATABASE_PASSWORD
-:
+        if settings.DATABASE_PASSWORD:
             # Replace password placeholder if exists
             mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD
 )

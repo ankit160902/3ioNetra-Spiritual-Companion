@@ -193,8 +193,7 @@ async def startup_event():
         from pymongo import MongoClient
         mongo_uri = settings.MONGODB_URI
 
-        if settings.DATABASE_PASSWORD
-:
+        if settings.DATABASE_PASSWORD:
             mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD
 )
         
