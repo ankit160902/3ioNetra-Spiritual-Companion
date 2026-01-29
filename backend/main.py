@@ -654,6 +654,11 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             
             # Add to history
             session.add_message('assistant', response_text)
+
+            # Oscillation Logic: Reset readiness to encourage listening phase next
+            session.memory.readiness_for_wisdom = 0.3  # Drop significantly to force listening turns
+            session.last_guidance_turn = session.turn_count # Mark this turn as guidance
+
             await session_manager.update_session(session)
 
             # Auto-save conversation to MongoDB if user is authenticated

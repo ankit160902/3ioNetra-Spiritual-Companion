@@ -55,6 +55,9 @@ class SessionState:
     min_signals_threshold: int = 4
     min_clarification_turns: int = 3
     max_clarification_turns: int = 6
+    
+    # Oscillation control
+    last_guidance_turn: int = -1  # Turn number when guidance was last given
 
     # Memory context for rich understanding
     memory: Optional[Any] = field(default=None)
@@ -98,14 +101,23 @@ class SessionState:
 
     def should_force_transition(self) -> bool:
         """Check if we should force transition to answering phase"""
-        # Force transition after max turns
+        # If we recently gave guidance, DO NOT force transition. 
+        # We need at least 2 turns of listening between wisdom.
+        if self.last_guidance_turn > 0 and (self.turn_count - self.last_guidance_turn) < 2:
+            return False
+
+        # Force transition after max turns (absolute cap)
         if self.turn_count >= self.max_clarification_turns:
-            return True
+            # If we haven't given guidance for a while, allow it
+            if self.last_guidance_turn == -1 or (self.turn_count - self.last_guidance_turn) > 3:
+                return True
 
         # Check if enough signals have been collected after min turns
         if self.turn_count >= self.min_clarification_turns:
             if len(self.signals_collected) >= self.min_signals_threshold:
-                return True
+                 # Again, ensure cooldown
+                if self.last_guidance_turn == -1 or (self.turn_count - self.last_guidance_turn) > 2:
+                    return True
 
         return False
 

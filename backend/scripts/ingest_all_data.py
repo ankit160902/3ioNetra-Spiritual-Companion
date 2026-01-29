@@ -72,8 +72,12 @@ class UniversalScriptureIngester:
             with open(file_path, 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
 
+                limit = 10000
+                if "gita" in file_path.name.lower():
+                    limit = 50000 # Ensure all Gita verses are included
+
                 for idx, row in enumerate(reader):
-                    if idx > 10000:  # Limit for performance
+                    if idx > limit:
                         break
 
                     verse = self._extract_verse_from_csv_row(row, file_path.stem)
@@ -136,12 +140,19 @@ class UniversalScriptureIngester:
         row_lower = {k.lower(): v for k, v in row.items() if v}
 
         # Extract fields
-        verse['chapter'] = row_lower.get('chapter') or row_lower.get('adhyaya')
-        verse['verse'] = row_lower.get('verse') or row_lower.get('shloka') or row_lower.get('id')
+        verse['chapter'] = row_lower.get('chapter') or row_lower.get('adhyaya') or row_lower.get('id', '').split('.')[0] if '.' in row_lower.get('id', '') else None
+        verse['verse'] = row_lower.get('verse') or row_lower.get('shloka') or row_lower.get('shloka_number')
+        
+        # Priority for English content
         verse['text'] = row_lower.get('engmeaning') or row_lower.get('translation') or row_lower.get('english') or row_lower.get('text')
-        verse['sanskrit'] = row_lower.get('shloka') or row_lower.get('original')
+        
+        # Original Sanskrit/Hindi
+        verse['sanskrit'] = row_lower.get('shloka') or row_lower.get('original') or row_lower.get('sanskrit')
+        
         verse['transliteration'] = row_lower.get('transliteration') or row_lower.get('iast')
-        verse['meaning'] = row_lower.get('meaning') or row_lower.get('explanation')
+        
+        # Add meaning/explanation
+        verse['meaning'] = row_lower.get('meaning') or row_lower.get('explanation') or row_lower.get('wordmeaning') or row_lower.get('hinmeaning')
         verse['hindi'] = row_lower.get('hinmeaning') or row_lower.get('hindi')
 
         # Only return if we have essential fields
@@ -195,7 +206,7 @@ class UniversalScriptureIngester:
         """Infer scripture name from filename"""
         source_lower = source.lower()
 
-        if 'bhagavad' in source_lower or 'gita' in source_lower:
+        if 'bhagavad' in source_lower or 'bhagwad' in source_lower or 'gita' in source_lower:
             return 'Bhagavad Gita'
         elif 'mahabharata' in source_lower:
             return 'Mahabharata'

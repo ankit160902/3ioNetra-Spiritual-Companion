@@ -83,7 +83,7 @@ class CompanionEngine:
                         query=search_query,
                         scripture_filter=None,
                         language="en",
-                        top_k=2  # Just 1-2 verses for subtle guidance during listening
+                        top_k=3  # Providing 3 verses for better selection during listening
                     )
                     logger.info(f"Retrieved {len(context_docs)} RAG docs for listening phase")
                 except Exception as e:
@@ -260,7 +260,7 @@ class CompanionEngine:
         # Increase readiness faster each turn to be more responsive
         memory.readiness_for_wisdom = min(
             1.0,
-            memory.readiness_for_wisdom + 0.4,
+            memory.readiness_for_wisdom + 0.2, # Slower ramp-up to allow improved context building
         )
 
     def _assess_readiness(self, session: SessionState) -> bool:
