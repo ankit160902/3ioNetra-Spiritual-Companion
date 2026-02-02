@@ -490,7 +490,7 @@ You have understood their situation. Now, be a wise friend leading them toward l
             
             # Generate response from Gemini
             response = self.client.models.generate_content(
-                model="gemini-3-pro-preview",
+                model="gemini-2.0-flash",
                 contents=prompt,
                 config={
                     "system_instruction": self.SYSTEM_INSTRUCTION,
