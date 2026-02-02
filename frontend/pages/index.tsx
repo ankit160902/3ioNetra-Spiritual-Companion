@@ -46,10 +46,9 @@ export default function Home() {
   const {
     session,
     isLoading: sessionLoading,
-    welcomeMessage,
-    createSession,
     sendMessage,
     resetSession,
+    error: sessionError,
   } = useSession(userProfile, getAuthHeader());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -66,25 +65,7 @@ export default function Home() {
   }, [isAuthenticated, user]);
 
   // Initialize session when using conversation flow and authenticated
-  useEffect(() => {
-    if (isAuthenticated && useConversationFlow && !session.sessionId && messages.length === 0) {
-      initializeSession();
-    }
-  }, [useConversationFlow, isAuthenticated]);
 
-  // Add welcome message when session is created
-  useEffect(() => {
-    if (welcomeMessage && messages.length === 0) {
-      setMessages([
-        {
-          role: 'assistant',
-          content: welcomeMessage,
-          timestamp: new Date(),
-          isWelcome: true,
-        },
-      ]);
-    }
-  }, [welcomeMessage]);
 
   const loadConversationHistory = async () => {
     try {
@@ -151,13 +132,6 @@ export default function Home() {
     }
   };
 
-  const initializeSession = async () => {
-    try {
-      await createSession();
-    } catch (error) {
-      console.error('Failed to create session:', error);
-    }
-  };
 
   const handleNewConversation = async () => {
     // Save current conversation before starting new one
@@ -168,9 +142,6 @@ export default function Home() {
     resetSession();
     setMessages([]);
     setCurrentConversationId(null);
-    if (useConversationFlow) {
-      await initializeSession();
-    }
   };
 
   const handleTextSubmit = async (e: React.FormEvent) => {
@@ -487,7 +458,7 @@ export default function Home() {
 
         {/* Messages Area */}
         <div className="max-w-4xl mx-auto px-4 py-6 h-[calc(100vh-220px)] overflow-y-auto">
-          {messages.length === 0 && !welcomeMessage ? (
+          {messages.length === 0 ? (
             <div className="text-center py-20">
               <div className="mb-6">
                 <h1 className="text-4xl font-bold text-gray-900">3ioNetra</h1>

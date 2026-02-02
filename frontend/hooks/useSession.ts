@@ -18,7 +18,7 @@ export interface Citation {
 
 export interface ConversationalResponse {
   session_id: string;
-  phase: 'listening' | 'clarification' | 'answering';
+  phase: 'listening' | 'clarification' | 'answering' | 'synthesis' | 'guidance' | 'closure';
   response: string;
   signals_collected: Record<string, string>;
   turn_count: number;
