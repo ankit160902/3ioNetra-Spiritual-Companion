@@ -1,7 +1,7 @@
 /**
  * useSession Hook - Manages conversation session state
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 // Types
 export interface Citation {
@@ -40,12 +40,16 @@ export interface UserProfile {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 export function useSession(userProfile?: UserProfile, authHeader?: Record<string, string>) {
+  // Use a ref for immediate access to the latest session ID without closure issues
+  const sessionIdRef = useRef<string | null>(null);
+
   const [session, setSession] = useState<SessionState>(() => {
     // Try to restore session from localStorage on mount
     if (typeof window !== 'undefined') {
       const savedSessionId = localStorage.getItem('spiritual_session_id');
       if (savedSessionId) {
         console.log('🔄 Restoring session from localStorage:', savedSessionId);
+        sessionIdRef.current = savedSessionId; // Sync ref
         return {
           sessionId: savedSessionId,
           phase: 'listening',
@@ -68,11 +72,12 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
   const [error, setError] = useState<string | null>(null);
   const [welcomeMessage, setWelcomeMessage] = useState<string>('');
 
-  // Sync session_id to localStorage whenever it changes
+  // Sync session_id to localStorage and Ref whenever it changes
   useEffect(() => {
     if (session.sessionId) {
       console.log('💾 Saving session_id to localStorage:', session.sessionId);
       localStorage.setItem('spiritual_session_id', session.sessionId);
+      sessionIdRef.current = session.sessionId; // Keep ref in sync
     }
   }, [session.sessionId]);
 
@@ -101,6 +106,9 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         isComplete: false,
       });
 
+      // Update ref immediately
+      sessionIdRef.current = data.session_id;
+
       setWelcomeMessage(data.message);
       return data.session_id;
     } catch (err) {
@@ -119,12 +127,24 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
       setError(null);
 
       try {
-        // CRITICAL: Get current session state at call time, not closure time
-        let currentSessionId: string | null = null;
-        setSession((prev) => {
-          currentSessionId = prev.sessionId;
-          return prev; // No change, just reading
-        });
+        // AGGRESSIVE STRATEGY: Check everywhere for the session ID
+        // 1. Check Ref (most recent memory)
+        // 2. Check State (react state)
+        // 3. Check LocalStorage (persistent storage)
+        let currentSessionId = sessionIdRef.current;
+
+        if (!currentSessionId) {
+          currentSessionId = session.sessionId;
+        }
+
+        if (!currentSessionId && typeof window !== 'undefined') {
+          const stored = localStorage.getItem('spiritual_session_id');
+          if (stored) {
+            console.log('⚠️ Recovered session_id from localStorage inside sendMessage:', stored);
+            currentSessionId = stored;
+            sessionIdRef.current = stored; // Update ref
+          }
+        }
 
         // Build request body, including user profile for new sessions
         const requestBody: Record<string, unknown> = {
@@ -354,6 +374,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
     if (typeof window !== 'undefined') {
       localStorage.removeItem('spiritual_session_id');
     }
+    sessionIdRef.current = null; // Clear ref
     setSession({
       sessionId: null,
       phase: 'clarification',

@@ -550,15 +550,26 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
 
         # Get or create session
         if query.session_id:
+            logger.info(f"🔍 Looking up session {query.session_id} in storage...")
             session = await session_manager.get_session(query.session_id)
             if not session:
-                raise HTTPException(status_code=404, detail="Session expired. Please start a new conversation.")
+                logger.warning(f"❌ Session {query.session_id} not found or expired. Creating a new session to continue.")
+                session = await session_manager.create_session(
+                    min_signals=settings.MIN_SIGNALS_THRESHOLD,
+                    min_turns=settings.MIN_CLARIFICATION_TURNS,
+                    max_turns=settings.MAX_CLARIFICATION_TURNS
+                )
+                logger.info(f"✅ Auto-recovered: Created new session {session.session_id} to replace missing {query.session_id}")
+            else:
+                logger.info(f"✅ Found existing session {query.session_id}, turn_count={session.turn_count}")
         else:
+            logger.info("🆕 No session_id provided, creating new session...")
             session = await session_manager.create_session(
                 min_signals=settings.MIN_SIGNALS_THRESHOLD,
                 min_turns=settings.MIN_CLARIFICATION_TURNS,
                 max_turns=settings.MAX_CLARIFICATION_TURNS
             )
+            logger.info(f"✅ Created new session {session.session_id}")
 
         # ALWAYS refresh user data in session memory if user is authenticated
         # This ensures even existing sessions get updated with user profile

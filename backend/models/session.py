@@ -36,6 +36,21 @@ class Signal:
     value: str
     confidence: float = 1.0
 
+    def to_dict(self) -> Dict:
+        return {
+            "signal_type": self.signal_type.value,
+            "value": self.value,
+            "confidence": self.confidence
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'Signal':
+        return cls(
+            signal_type=SignalType(data["signal_type"]),
+            value=data["value"],
+            confidence=data.get("confidence", 1.0)
+        )
+
 
 @dataclass
 class SessionState:
@@ -58,6 +73,49 @@ class SessionState:
     
     # Oscillation control
     last_guidance_turn: int = -1  # Turn number when guidance was last given
+
+    def to_dict(self) -> Dict:
+        return {
+            "session_id": self.session_id,
+            "phase": self.phase.value,
+            "turn_count": self.turn_count,
+            "signals_collected": {st.value: s.to_dict() for st, s in self.signals_collected.items()},
+            "conversation_history": self.conversation_history,
+            "created_at": self.created_at.isoformat(),
+            "last_activity": self.last_activity.isoformat(),
+            "min_signals_threshold": self.min_signals_threshold,
+            "min_clarification_turns": self.min_clarification_turns,
+            "max_clarification_turns": self.max_clarification_turns,
+            "last_guidance_turn": self.last_guidance_turn,
+            "memory": self.memory.to_dict() if self.memory else None
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'SessionState':
+        from models.memory_context import ConversationMemory
+        
+        signals = {}
+        for k, v in data.get("signals_collected", {}).items():
+            try:
+                signals[SignalType(k)] = Signal.from_dict(v)
+            except ValueError:
+                continue
+
+        session = cls(
+            session_id=data["session_id"],
+            phase=ConversationPhase(data["phase"]),
+            turn_count=data["turn_count"],
+            signals_collected=signals,
+            conversation_history=data.get("conversation_history", []),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            last_activity=datetime.fromisoformat(data["last_activity"]),
+            min_signals_threshold=data.get("min_signals_threshold", 4),
+            min_clarification_turns=data.get("min_clarification_turns", 3),
+            max_clarification_turns=data.get("max_clarification_turns", 6),
+            last_guidance_turn=data.get("last_guidance_turn", -1),
+            memory=ConversationMemory.from_dict(data.get("memory", {}))
+        )
+        return session
 
     # Memory context for rich understanding
     memory: Optional[Any] = field(default=None)

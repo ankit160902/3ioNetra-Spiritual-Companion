@@ -30,6 +30,33 @@ class UserStory:
     age_group: str = ""
     gender: str = ""
     profession: str = ""
+    
+    def to_dict(self) -> Dict:
+        return {
+            "primary_concern": self.primary_concern,
+            "emotional_state": self.emotional_state,
+            "life_area": self.life_area,
+            "trigger_event": self.trigger_event,
+            "unmet_needs": self.unmet_needs,
+            "age_group": self.age_group,
+            "gender": self.gender,
+            "profession": self.profession
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'UserStory':
+        if not data:
+            return cls()
+        return cls(
+            primary_concern=data.get("primary_concern", ""),
+            emotional_state=data.get("emotional_state"),
+            life_area=data.get("life_area"),
+            trigger_event=data.get("trigger_event"),
+            unmet_needs=data.get("unmet_needs", []),
+            age_group=data.get("age_group", ""),
+            gender=data.get("gender", ""),
+            profession=data.get("profession", "")
+        )
 
 
 @dataclass
@@ -63,6 +90,42 @@ class ConversationMemory:
     user_phone: str = ""
     user_dob: str = ""
     user_created_at: str = ""
+
+    def to_dict(self) -> Dict:
+        return {
+            "story": self.story.to_dict(),
+            "readiness_for_wisdom": self.readiness_for_wisdom,
+            "user_quotes": self.user_quotes,
+            "emotional_arc": self.emotional_arc,
+            "relevant_concepts": self.relevant_concepts,
+            "conversation_history": self.conversation_history,
+            "user_id": self.user_id,
+            "user_name": self.user_name,
+            "user_email": self.user_email,
+            "user_phone": self.user_phone,
+            "user_dob": self.user_dob,
+            "user_created_at": self.user_created_at
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'ConversationMemory':
+        if not data:
+            return cls()
+        memory = cls(
+            story=UserStory.from_dict(data.get("story", {})),
+            readiness_for_wisdom=data.get("readiness_for_wisdom", 0.0),
+            user_quotes=data.get("user_quotes", []),
+            emotional_arc=data.get("emotional_arc", []),
+            relevant_concepts=data.get("relevant_concepts", []),
+            conversation_history=data.get("conversation_history", []),
+            user_id=data.get("user_id", ""),
+            user_name=data.get("user_name", ""),
+            user_email=data.get("user_email", ""),
+            user_phone=data.get("user_phone", ""),
+            user_dob=data.get("user_dob", ""),
+            user_created_at=data.get("user_created_at", "")
+        )
+        return memory
 
     def add_user_quote(self, turn: int, quote: str) -> None:
         """Record a significant user quote"""
