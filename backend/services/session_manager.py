@@ -8,23 +8,42 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 
-class SessionManager:
-    """Base class/interface for Session Managers"""
-    async def create_session(self, **kwargs) -> SessionState: pass
-    async def get_session(self, session_id: str) -> Optional[SessionState]: pass
-    async def update_session(self, session: SessionState) -> None: pass
-    async def delete_session(self, session_id: str) -> None: pass
-    async def transition_phase(self, session: SessionState, new_phase: ConversationPhase) -> SessionState: pass
+# ============================================================================
+# Base Interface
+# ============================================================================
 
+class SessionManager:
+    async def create_session(self, **kwargs) -> SessionState:
+        raise NotImplementedError
+
+    async def get_session(self, session_id: str) -> Optional[SessionState]:
+        raise NotImplementedError
+
+    async def update_session(self, session: SessionState) -> None:
+        raise NotImplementedError
+
+    async def delete_session(self, session_id: str) -> None:
+        raise NotImplementedError
+
+    async def transition_phase(
+        self,
+        session: SessionState,
+        new_phase: ConversationPhase
+    ) -> SessionState:
+        session.phase = new_phase
+        await self.update_session(session)
+        return session
+
+
+# ============================================================================
+# In-Memory Session Manager (Local Dev)
+# ============================================================================
 
 class InMemorySessionManager(SessionManager):
-    """
-    In-memory session storage (default for local dev).
-    """
-    def __init__(self, ttl_minutes: int = 60):
+    def __init__(self, ttl_minutes: int):
         self._sessions: Dict[str, SessionState] = {}
         self._ttl = timedelta(minutes=ttl_minutes)
-        logger.info(f"InMemorySessionManager initialized (TTL: {ttl_minutes}m)")
+        logger.info(f"InMemorySessionManager initialized (TTL={ttl_minutes}m)")
 
     async def create_session(self, min_signals=4, min_turns=3, max_turns=6) -> SessionState:
         session = SessionState(
@@ -37,11 +56,14 @@ class InMemorySessionManager(SessionManager):
 
     async def get_session(self, session_id: str) -> Optional[SessionState]:
         session = self._sessions.get(session_id)
-        if session:
-            if datetime.utcnow() - session.last_activity > self._ttl:
-                del self._sessions[session_id]
-                return None
-            session.last_activity = datetime.utcnow()
+        if not session:
+            return None
+
+        if datetime.utcnow() - session.last_activity > self._ttl:
+            del self._sessions[session_id]
+            return None
+
+        session.last_activity = datetime.utcnow()
         return session
 
     async def update_session(self, session: SessionState) -> None:
@@ -49,30 +71,35 @@ class InMemorySessionManager(SessionManager):
         self._sessions[session.session_id] = session
 
     async def delete_session(self, session_id: str) -> None:
-        if session_id in self._sessions:
-            del self._sessions[session_id]
+        self._sessions.pop(session_id, None)
 
-    async def transition_phase(self, session: SessionState, new_phase: ConversationPhase) -> SessionState:
-        session.phase = new_phase
-        await self.update_session(session)
-        return session
 
+# ============================================================================
+# MongoDB Session Manager (Production)
+# ============================================================================
 
 class MongoSessionManager(SessionManager):
-    """
-    MongoDB-backed session storage for multi-instance production environments.
-    """
-    def __init__(self, ttl_minutes: int = 60):
+    def __init__(self, ttl_minutes: int):
         from services.auth_service import get_mongo_client
+
         self.db = get_mongo_client()
         self.collection = self.db.sessions
-        self._ttl = timedelta(minutes=ttl_minutes)
-        
-        # Ensure index for automatic expiration
-        self.collection.create_index("last_activity", expireAfterSeconds=ttl_minutes * 60)
-        self.collection.create_index("session_id", unique=True)
-        
-        logger.info(f"MongoSessionManager initialized (TTL: {ttl_minutes}m)")
+        self._ttl_seconds = ttl_minutes * 60
+
+        self._ensure_indexes()
+        logger.info(f"MongoSessionManager initialized (TTL={ttl_minutes}m)")
+
+    def _ensure_indexes(self):
+        indexes = self.collection.index_information()
+
+        if "session_id_1" not in indexes:
+            self.collection.create_index("session_id", unique=True)
+
+        if "last_activity_1" not in indexes:
+            self.collection.create_index(
+                "last_activity",
+                expireAfterSeconds=self._ttl_seconds
+            )
 
     async def create_session(self, min_signals=4, min_turns=3, max_turns=6) -> SessionState:
         session = SessionState(
@@ -80,68 +107,63 @@ class MongoSessionManager(SessionManager):
             min_clarification_turns=min_turns,
             max_clarification_turns=max_turns
         )
-        # Store initial state
         await self.update_session(session)
-        logger.info(f"💾 Created and saved new session to MongoDB: {session.session_id}")
+        logger.info(f"🆕 Created session {session.session_id}")
         return session
 
     async def get_session(self, session_id: str) -> Optional[SessionState]:
-        logger.debug(f"🔍 Querying MongoDB for session {session_id}")
         doc = self.collection.find_one({"session_id": session_id})
         if not doc:
-            logger.debug(f"❌ Session {session_id} not found in MongoDB")
             return None
-        
-        try:
-            session = SessionState.from_dict(doc)
-            logger.debug(f"✅ Retrieved session {session_id} from MongoDB, turn_count={session.turn_count}")
-            return session
-        except Exception as e:
-            logger.error(f"❌ Error deserializing session {session_id}: {e}")
-            return None
+
+        session = SessionState.from_dict(doc)
+
+        # 🔥 CRITICAL: refresh activity on read
+        session.last_activity = datetime.utcnow()
+        await self.update_session(session)
+
+        return session
 
     async def update_session(self, session: SessionState) -> None:
         session.last_activity = datetime.utcnow()
         data = session.to_dict()
-        
-        # Use upsert to save session state
-        result = self.collection.update_one(
+
+        self.collection.update_one(
             {"session_id": session.session_id},
             {"$set": data},
             upsert=True
         )
-        logger.debug(f"💾 Saved session {session.session_id} to MongoDB (turn_count={session.turn_count}, matched={result.matched_count}, upserted={result.upserted_id is not None})")
 
     async def delete_session(self, session_id: str) -> None:
         self.collection.delete_one({"session_id": session_id})
 
-    async def transition_phase(self, session: SessionState, new_phase: ConversationPhase) -> SessionState:
-        session.phase = new_phase
-        await self.update_session(session)
-        return session
 
+# ============================================================================
+# Singleton Factory
+# ============================================================================
 
-# Singleton instance
 _session_manager: Optional[SessionManager] = None
 
 
-def get_session_manager(ttl_minutes: int = 60) -> SessionManager:
+def get_session_manager() -> SessionManager:
     """
-    Get the appropriate SessionManager instance.
-    Prefers MongoDB if configured, otherwise falls back to memory.
+    Singleton session manager.
+    MongoDB is preferred if configured, otherwise in-memory.
     """
     global _session_manager
+
     if _session_manager is None:
-        # Check if MongoDB is configured in settings
+        ttl = settings.SESSION_TTL_MINUTES
+
         if settings.MONGODB_URI and settings.DATABASE_NAME:
             try:
-                _session_manager = MongoSessionManager(ttl_minutes=ttl_minutes)
-                logger.info("Using MongoDB for persistent session storage")
+                _session_manager = MongoSessionManager(ttl)
+                logger.info("✅ Using MongoDB session storage")
             except Exception as e:
-                logger.error(f"Failed to initialize MongoSessionManager: {e}. Falling back to In-Memory.")
-                _session_manager = InMemorySessionManager(ttl_minutes=ttl_minutes)
+                logger.error(f"Mongo init failed, falling back to memory: {e}")
+                _session_manager = InMemorySessionManager(ttl)
         else:
-            logger.info("No MongoDB config found. Using In-Memory session storage.")
-            _session_manager = InMemorySessionManager(ttl_minutes=ttl_minutes)
-            
+            logger.info("ℹ️ Using in-memory session storage")
+            _session_manager = InMemorySessionManager(ttl)
+
     return _session_manager
