@@ -47,7 +47,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://3io-netra-spiritual-companion.vercel.app",
+        "https://3io-netra-spiritual-companion-vd8m.vercel.app/",
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:8000",
